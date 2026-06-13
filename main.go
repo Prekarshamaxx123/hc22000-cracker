@@ -64,6 +64,30 @@ func parseHC22000(path string) (*HashInfo, error) {
 	return nil, fmt.Errorf("no valid hc22000 entry found in file")
 }
 
+func isLikelyHexEncodedESSID(s string) bool {
+	if len(s) < 2 || len(s)%2 != 0 || !isHexString(s) {
+		return false
+	}
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		return false
+	}
+	for _, c := range b {
+		if c < 32 || c > 126 {
+			return false
+		}
+	}
+	return true
+}
+
+func decodeHexESSID(s string) string {
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		return s
+	}
+	return string(b)
+}
+
 func parseHC22000Line(line string) (*HashInfo, error) {
 	sep := "*"
 	if strings.Contains(line, "*") {
@@ -75,7 +99,7 @@ func parseHC22000Line(line string) (*HashInfo, error) {
 	}
 
 	parts := strings.Split(line, sep)
-	if len(parts) < 4 {
+	if len(parts) < 5 {
 		return nil, fmt.Errorf("too few fields")
 	}
 
@@ -102,10 +126,34 @@ func parseHC22000Line(line string) (*HashInfo, error) {
 		staStr = ""
 	}
 
-	essidParts := parts[start+3:]
-	essid := strings.Join(essidParts, sep)
-	essid = strings.TrimRight(essid, "*")
-	essid = strings.TrimSpace(essid)
+	remaining := parts[start+3:]
+
+	essidField := ""
+	for _, f := range remaining {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		if len(f) == 64 && isHexString(f) {
+			continue
+		}
+		if len(f) > 128 && isHexString(f) {
+			continue
+		}
+		if isLikelyHexEncodedESSID(f) {
+			essidField = decodeHexESSID(f)
+			break
+		}
+		if !isHexString(f) || len(f) < 6 {
+			essidField = f
+			break
+		}
+	}
+	if essidField == "" {
+		essidField = remaining[0]
+	}
+
+	essid := strings.TrimSpace(essidField)
 	if essid == "" {
 		return nil, fmt.Errorf("empty ESSID")
 	}
@@ -349,9 +397,12 @@ func parseLength(s string) (int, int, error) {
 }
 
 func crack(hashInfo *HashInfo, config *Config) {
-	if config.Mode == "cpu" || config.Mode == "all" {
+	switch config.Mode {
+	case "cpu":
 		crackCPU(hashInfo, config)
-	} else if config.Mode == "gpu" {
+	case "gpu":
+		crackGPU(hashInfo, config)
+	case "all":
 		crackGPU(hashInfo, config)
 	}
 }
