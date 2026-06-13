@@ -318,12 +318,7 @@ func crackGPU(hashInfo *HashInfo, config *Config) {
 				C.clFinish(q)
 			}
 
-			gs := C.size_t(ws)
-			ls := C.size_t(64)
-			if gs < ls {
-				ls = gs
-			}
-			e := C.clEnqueueNDRangeKernel(q, ker, 1, nil, &gs, &ls, 0, nil, nil)
+			e := C.clEnqueueNDRangeKernel(q, ker, 1, nil, &C.size_t(ws), nil, 0, nil, nil)
 			if e != C.CL_SUCCESS {
 				gpuErr("enqueue", e)
 			}
