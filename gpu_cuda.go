@@ -21,13 +21,14 @@ import "C"
 import (
 	"encoding/hex"
 	"fmt"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
 	"unsafe"
 )
 
-func crackGPU(hashInfo *HashInfo, config *Config) {
+func crackGPU(hashInfo *HashInfo, config *Config, startAt, count uint64) {
 	targetPMKID, _ := hex.DecodeString(hashInfo.PMKIDHex)
 	targetPMKID = targetPMKID[:16]
 	ssidBytes := []byte(hashInfo.SSID)
@@ -42,17 +43,33 @@ func crackGPU(hashInfo *HashInfo, config *Config) {
 	var gAttempts uint64
 	chunkSize := uint64(500000)
 
-	fmt.Printf("CUDA GPU cracking\n")
+	fmt.Printf("CUDA GPU cracking")
+	if config.MinLen == config.MaxLen && count > 0 {
+		total := powUint64(uint64(len(config.Charset)), config.MinLen)
+		pct := float64(count) * 100.0 / float64(total)
+		fmt.Printf(" (%.0f%% of length %d)", pct, config.MinLen)
+	}
+	fmt.Println()
 	fmt.Println()
 
 	for length := config.MinLen; length <= config.MaxLen && atomic.LoadInt32(&gFound) == 0; length++ {
 		totalForLen := powUint64(uint64(len(config.Charset)), length)
 		var processed uint64
 
-		for start := uint64(0); start < totalForLen && atomic.LoadInt32(&gFound) == 0; start += chunkSize {
+		lenStart := uint64(0)
+		lenEnd := totalForLen
+		if config.MinLen == config.MaxLen && count > 0 {
+			lenStart = startAt
+			lenEnd = startAt + count
+			if lenEnd > totalForLen {
+				lenEnd = totalForLen
+			}
+		}
+
+		for start := lenStart; start < lenEnd && atomic.LoadInt32(&gFound) == 0; start += chunkSize {
 			end := start + chunkSize
-			if end > totalForLen {
-				end = totalForLen
+			if end > lenEnd {
+				end = lenEnd
 			}
 			ws := end - start
 
@@ -73,25 +90,24 @@ func crackGPU(hashInfo *HashInfo, config *Config) {
 			atomic.AddUint64(&gAttempts, ws)
 
 			if found < 0 {
-				fmt.Printf("\nCUDA error occurred. Falling back to CPU...\n")
-				crackCPU(hashInfo, config)
+				fmt.Printf("\nCUDA error. Falling back to CPU...\n")
+				crackCPU(hashInfo, config, 0)
 				return
 			}
 			if found != 0 {
 				pwStr := strings.TrimRight(string(foundPW), "\x00")
-				atomic.StoreInt32(&gFound, 1)
 				elapsed := time.Since(startTime)
 				fmt.Printf("\n\n=== PASSWORD FOUND ===\n")
 				fmt.Printf("Password: %s\n", pwStr)
 				fmt.Printf("Elapsed:  %s\n", formatDuration(elapsed))
 				fmt.Printf("Attempts: %d\n", atomic.LoadUint64(&gAttempts))
 				fmt.Println("=======================\n")
-				return
+				os.Exit(0)
 			}
 
 			elapsed := time.Since(startTime)
 			speed := uint64(float64(atomic.LoadUint64(&gAttempts)) / elapsed.Seconds())
-			pct := float64(processed) * 100.0 / float64(totalForLen)
+			pct := float64(processed) * 100.0 / float64(lenEnd-lenStart)
 			fmt.Printf("\r[%s] CUDA Speed: %s/s | Len %d | %5.2f%%",
 				formatDuration(elapsed), formatNumber(speed), length, pct)
 		}
@@ -99,8 +115,6 @@ func crackGPU(hashInfo *HashInfo, config *Config) {
 
 	if atomic.LoadInt32(&gFound) == 0 {
 		elapsed := time.Since(startTime)
-		fmt.Printf("\n\n=== NOT FOUND ===\n")
-		fmt.Printf("All combinations exhausted.\n")
-		fmt.Printf("Elapsed: %s\n", formatDuration(elapsed))
+		fmt.Printf("\n[%s] CUDA: range exhausted.\n", formatDuration(elapsed))
 	}
 }

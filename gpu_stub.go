@@ -4,7 +4,7 @@ package main
 
 import "fmt"
 
-func crackGPU(hashInfo *HashInfo, config *Config) {
+func crackGPU(hashInfo *HashInfo, config *Config, startAt, count uint64) {
 	fmt.Println("GPU mode not compiled in.")
 	fmt.Println()
 	fmt.Println("To enable GPU support:")
@@ -12,5 +12,5 @@ func crackGPU(hashInfo *HashInfo, config *Config) {
 	fmt.Println("  go build -tags gpu")
 	fmt.Println()
 	fmt.Println("Falling back to CPU mode...")
-	crackCPU(hashInfo, config)
+	crackCPU(hashInfo, config, 0)
 }

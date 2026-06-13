@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -399,15 +400,56 @@ func parseLength(s string) (int, int, error) {
 func crack(hashInfo *HashInfo, config *Config) {
 	switch config.Mode {
 	case "cpu":
-		crackCPU(hashInfo, config)
+		crackCPU(hashInfo, config, 0)
 	case "gpu":
-		crackGPU(hashInfo, config)
+		crackGPU(hashInfo, config, 0, 0)
 	case "all":
-		crackGPU(hashInfo, config)
+		crackAll(hashInfo, config)
 	}
 }
 
-func crackCPU(hashInfo *HashInfo, config *Config) {
+func crackAll(hashInfo *HashInfo, config *Config) {
+	if config.MinLen == config.MaxLen {
+		total := powUint64(uint64(len(config.Charset)), config.MinLen)
+		half := total / 2
+		fmt.Printf("GPU: [0, %s) | CPU: [%s, %s)\n",
+			formatNumber(half), formatNumber(half), formatNumber(total))
+		fmt.Println()
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			crackGPU(hashInfo, config, 0, half)
+		}()
+		crackCPU(hashInfo, config, half)
+		wg.Wait()
+	} else {
+		midLen := config.MinLen + (config.MaxLen-config.MinLen)/2
+		gpuCfg := *config
+		gpuCfg.MaxLen = midLen
+		cpuCfg := *config
+		cpuCfg.MinLen = midLen + 1
+
+		fmt.Printf("GPU: lengths %d-%d | CPU: lengths %d-%d\n",
+			gpuCfg.MinLen, gpuCfg.MaxLen, cpuCfg.MinLen, cpuCfg.MaxLen)
+		fmt.Println()
+
+		var wg sync.WaitGroup
+		if gpuCfg.MinLen <= gpuCfg.MaxLen {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				crackGPU(hashInfo, &gpuCfg, 0, 0)
+			}()
+		}
+		if cpuCfg.MinLen <= cpuCfg.MaxLen {
+			crackCPU(hashInfo, &cpuCfg, 0)
+		}
+		wg.Wait()
+	}
+}
+
+func crackCPU(hashInfo *HashInfo, config *Config, startAt uint64) {
 	numCPU := runtime.NumCPU()
 	numWorkers := int(float64(numCPU) * float64(config.LimitPct) / 100.0)
 	if numWorkers < 1 {
@@ -423,6 +465,7 @@ func crackCPU(hashInfo *HashInfo, config *Config) {
 	targetPMKID, err := hex.DecodeString(hashInfo.PMKIDHex)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error decoding PMKID: %v\n", err)
+		runtime.GOMAXPROCS(oldProcs)
 		return
 	}
 	targetPMKID = targetPMKID[:16]
@@ -432,10 +475,14 @@ func crackCPU(hashInfo *HashInfo, config *Config) {
 
 	total := totalCombinations(config.Charset, config.MinLen, config.MaxLen)
 
-	fmt.Printf("CPU workers: %d (of %d cores, %d%% limit)\n", numWorkers, numCPU, config.LimitPct)
+	fmt.Printf("CPU workers: %d (of %d cores, %d%% limit)", numWorkers, numCPU, config.LimitPct)
+	if startAt > 0 {
+		fmt.Printf(" | starting at index %s", formatNumber(startAt))
+	}
+	fmt.Println()
 	fmt.Println()
 
-	var counter uint64
+	var counter uint64 = startAt
 	var found int32
 	var foundPW string
 	var attempts uint64
@@ -460,6 +507,7 @@ func crackCPU(hashInfo *HashInfo, config *Config) {
 				if string(pmkid) == string(targetPMKID) {
 					atomic.StoreInt32(&found, 1)
 					foundPW = pw
+					atomic.AddUint64(&attempts, 1)
 					return
 				}
 				atomic.AddUint64(&attempts, 1)
@@ -485,13 +533,14 @@ func crackCPU(hashInfo *HashInfo, config *Config) {
 			fmt.Printf("Speed:    %s/s\n", formatNumber(speed))
 			fmt.Println("=======================\n")
 			runtime.GOMAXPROCS(oldProcs)
+			os.Exit(0)
 			return
 		}
 
 		curIdx := atomic.LoadUint64(&counter)
 		var pct float64
 		if total != math.MaxUint64 && total > 0 {
-			pct = float64(curIdx) * 100.0 / float64(total)
+			pct = float64(curIdx-startAt) * 100.0 / float64(total-startAt)
 		}
 
 		currentPW := "---"
