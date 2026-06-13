@@ -86,7 +86,7 @@ __device__ void pbkdf2_fast(const uint *in_state, const uint *out_state,
     }
 }
 
-__global__ void crack_kernel(
+__global__ void __launch_bounds__(128) crack_kernel(
     const uchar *charset, uint charset_len, uint pw_length,
     const uchar *ssid, uint ssid_len,
     const uchar *target, const uchar *ap_mac, const uchar *sta_mac,
@@ -104,33 +104,41 @@ __global__ void crack_kernel(
 
     uint in_state[5]={0x67452301U,0xEFCDAB89U,0x98BADCFEU,0x10325476U,0xC3D2E1F0U};
     uint out_state[5]={0x67452301U,0xEFCDAB89U,0x98BADCFEU,0x10325476U,0xC3D2E1F0U};
-    uchar ipad[64], opad[64], padbuf[64];
+
+    uchar pad[64];
     for (int i=0;i<64;i++) {
         uchar k=(i<(int)pw_length)?pw[i]:0;
-        ipad[i]=k^0x36U; opad[i]=k^0x5CU;
+        pad[i]=k^0x36U;
     }
-    sha1_block(in_state, ipad);
-    sha1_block(out_state, opad);
+    sha1_block(in_state, pad);
+    for (int i=0;i<64;i++) pad[i]^=0x6aU;
+    sha1_block(out_state, pad);
 
     uchar pmk[32], scr[256];
     pbkdf2_fast(in_state, out_state, ssid, ssid_len, 4096, 32, pmk, scr);
 
+    // Reuse scr for PMKID: scr[0..63]=pad, scr[64..83]=idig, scr[84..147]=buf
     uchar pm_msg[20];
     pm_msg[0]=80;pm_msg[1]=77;pm_msg[2]=75;pm_msg[3]=32;
     pm_msg[4]=78;pm_msg[5]=97;pm_msg[6]=109;pm_msg[7]=101;
     for (int i=0;i<6;i++){pm_msg[8+i]=ap_mac[i];pm_msg[14+i]=sta_mac[i];}
 
-    uchar pr[20];
-    {
-        uchar ipad2[64],opad2[64],idig[20],buf2[64];
-        for (int i=0;i<64;i++){uchar k=(i<32)?pmk[i]:0;ipad2[i]=k^0x36U;opad2[i]=k^0x5CU;}
-        uint ts[5]={0x67452301U,0xEFCDAB89U,0x98BADCFEU,0x10325476U,0xC3D2E1F0U};
-        sha1_block(ts,ipad2);
-        sha1_finish(ts,pm_msg,20,(64+20)*8,idig,buf2);
-        ts[0]=0x67452301U;ts[1]=0xEFCDAB89U;ts[2]=0x98BADCFEU;ts[3]=0x10325476U;ts[4]=0xC3D2E1F0U;
-        sha1_block(ts,opad2);
-        sha1_finish(ts,idig,20,(64+20)*8,pr,buf2);
+    for (int i=0;i<64;i++) {
+        uchar k=(i<32)?pmk[i]:0;
+        scr[i]=k^0x36U;
     }
+
+    uint ts[5]={0x67452301U,0xEFCDAB89U,0x98BADCFEU,0x10325476U,0xC3D2E1F0U};
+    sha1_block(ts, scr);
+    sha1_finish(ts, pm_msg, 20, (64+20)*8, scr+64, scr+84);
+
+    for (int i=0;i<64;i++) scr[i]^=0x6aU;
+
+    ts[0]=0x67452301U;ts[1]=0xEFCDAB89U;ts[2]=0x98BADCFEU;ts[3]=0x10325476U;ts[4]=0xC3D2E1F0U;
+    sha1_block(ts, scr);
+
+    uchar pr[20];
+    sha1_finish(ts, scr+64, 20, (64+20)*8, pr, scr+84);
 
     int ok=1;
     for (int i=0;i<16;i++) if (pr[i]!=target[i]){ok=0;break;}
