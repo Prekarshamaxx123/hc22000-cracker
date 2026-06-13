@@ -3,6 +3,7 @@
 package main
 
 /*
+#cgo CFLAGS: -I/usr/local/cuda/include
 #cgo LDFLAGS: crack.o -L/usr/local/cuda/lib64 -lcudart -lcuda
 #include <cuda_runtime.h>
 

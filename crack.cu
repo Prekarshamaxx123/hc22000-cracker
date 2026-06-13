@@ -1,7 +1,10 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
 
+typedef unsigned char uchar;
+typedef unsigned int uint;
 typedef unsigned long long ull;
+
 #define ROTL(x,n) (((x)<<(n))|((x)>>(32-(n))))
 
 __device__ void sha1_block(uint *state, const uchar *block) {
