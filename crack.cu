@@ -1,5 +1,6 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
+#include <string.h>
 
 typedef unsigned char uchar;
 typedef unsigned int uint;
@@ -84,9 +85,10 @@ __global__ void crack_kernel(
     const uchar *charset, uint charset_len, uint pw_length,
     const uchar *ssid, uint ssid_len,
     const uchar *target, const uchar *ap_mac, const uchar *sta_mac,
-    ull start, volatile int *found, uchar *found_pw
+    ull start, ull count, volatile int *found, uchar *found_pw
 ) {
     ull idx=start+blockIdx.x*blockDim.x+threadIdx.x;
+    if (idx>=start+count) return;
     if (*found) return;
 
     uchar pw[32];
@@ -125,61 +127,68 @@ int cuda_crack(
     uchar *d_charset, *d_ssid, *d_target, *d_ap, *d_sta;
     int *d_found;
     uchar *d_found_pw;
+    cudaError_t err;
 
-    cudaMalloc(&d_charset, charset_len);
-    cudaMalloc(&d_ssid, ssid_len);
-    cudaMalloc(&d_target, 16);
-    cudaMalloc(&d_ap, 6);
-    cudaMalloc(&d_sta, 6);
-    cudaMalloc(&d_found, sizeof(int));
-    cudaMalloc(&d_found_pw, 64);
+    err = cudaMalloc(&d_charset, charset_len);
+    if (err) { fprintf(stderr, "cudaMalloc charset: %s\n", cudaGetErrorString(err)); return -1; }
+    err = cudaMalloc(&d_ssid, ssid_len);
+    if (err) { fprintf(stderr, "cudaMalloc ssid: %s\n", cudaGetErrorString(err)); return -1; }
+    err = cudaMalloc(&d_target, 16);
+    if (err) { fprintf(stderr, "cudaMalloc target: %s\n", cudaGetErrorString(err)); return -1; }
+    err = cudaMalloc(&d_ap, 6);
+    if (err) { fprintf(stderr, "cudaMalloc ap: %s\n", cudaGetErrorString(err)); return -1; }
+    err = cudaMalloc(&d_sta, 6);
+    if (err) { fprintf(stderr, "cudaMalloc sta: %s\n", cudaGetErrorString(err)); return -1; }
+    err = cudaMalloc(&d_found, sizeof(int));
+    if (err) { fprintf(stderr, "cudaMalloc found: %s\n", cudaGetErrorString(err)); return -1; }
+    err = cudaMalloc(&d_found_pw, 64);
+    if (err) { fprintf(stderr, "cudaMalloc found_pw: %s\n", cudaGetErrorString(err)); return -1; }
 
-    cudaMemcpy(d_charset, charset, charset_len, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_ssid, ssid, ssid_len, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_target, target, 16, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_ap, ap_mac, 6, cudaMemcpyHostToDevice);
-    cudaMemcpy(d_sta, sta_mac, 6, cudaMemcpyHostToDevice);
+    err = cudaMemcpy(d_charset, charset, charset_len, cudaMemcpyHostToDevice);
+    if (err) { fprintf(stderr, "cudaMemcpy charset: %s\n", cudaGetErrorString(err)); return -1; }
+    err = cudaMemcpy(d_ssid, ssid, ssid_len, cudaMemcpyHostToDevice);
+    if (err) { fprintf(stderr, "cudaMemcpy ssid: %s\n", cudaGetErrorString(err)); return -1; }
+    err = cudaMemcpy(d_target, target, 16, cudaMemcpyHostToDevice);
+    if (err) { fprintf(stderr, "cudaMemcpy target: %s\n", cudaGetErrorString(err)); return -1; }
+    err = cudaMemcpy(d_ap, ap_mac, 6, cudaMemcpyHostToDevice);
+    if (err) { fprintf(stderr, "cudaMemcpy ap: %s\n", cudaGetErrorString(err)); return -1; }
+    err = cudaMemcpy(d_sta, sta_mac, 6, cudaMemcpyHostToDevice);
+    if (err) { fprintf(stderr, "cudaMemcpy sta: %s\n", cudaGetErrorString(err)); return -1; }
 
-    int zero=0;
+    int zero = 0;
     cudaMemcpy(d_found, &zero, sizeof(int), cudaMemcpyHostToDevice);
 
     int blockSize = 128;
-    int gridSize = (count + blockSize - 1) / blockSize;
+    int gridSize = (int)((count + blockSize - 1) / blockSize);
+    if (gridSize < 1) gridSize = 1;
     if (gridSize > 65535) gridSize = 65535;
 
-    ull remaining = count;
-    ull chunk_start = start;
-    while (remaining > 0 && gridSize > 0) {
-        int threads = blockSize * gridSize;
-        if (threads > remaining) {
-            gridSize = (remaining + blockSize - 1) / blockSize;
-            threads = blockSize * gridSize;
-        }
+    crack_kernel<<<gridSize, blockSize>>>(
+        d_charset, charset_len, pw_length,
+        d_ssid, ssid_len,
+        d_target, d_ap, d_sta,
+        start, count, d_found, d_found_pw
+    );
 
-        crack_kernel<<<gridSize, blockSize>>>(
-            d_charset, charset_len, pw_length,
-            d_ssid, ssid_len,
-            d_target, d_ap, d_sta,
-            chunk_start, d_found, d_found_pw
-        );
-        cudaDeviceSynchronize();
+    err = cudaDeviceSynchronize();
+    if (err) {
+        fprintf(stderr, "kernel error: %s\n", cudaGetErrorString(err));
+        cudaFree(d_charset);cudaFree(d_ssid);cudaFree(d_target);
+        cudaFree(d_ap);cudaFree(d_sta);cudaFree(d_found);cudaFree(d_found_pw);
+        return -1;
+    }
 
-        int found_val;
-        cudaMemcpy(&found_val, d_found, sizeof(int), cudaMemcpyDeviceToHost);
-        if (found_val) {
-            uchar pw[64]={0};
-            cudaMemcpy(pw, d_found_pw, 64, cudaMemcpyDeviceToHost);
-            for (int i=0;i<64;i++) found_pw[i]=(char)pw[i];
-            cudaFree(d_charset);cudaFree(d_ssid);cudaFree(d_target);
-            cudaFree(d_ap);cudaFree(d_sta);cudaFree(d_found);cudaFree(d_found_pw);
-            return 1;
-        }
+    int found_val = 0;
+    cudaMemcpy(&found_val, d_found, sizeof(int), cudaMemcpyDeviceToHost);
 
-        remaining -= threads;
-        chunk_start += threads;
-        if (remaining < threads) {
-            gridSize = (remaining + blockSize - 1) / blockSize;
-        }
+    if (found_val) {
+        uchar pw[64];
+        memset(pw, 0, 64);
+        cudaMemcpy(pw, d_found_pw, 64, cudaMemcpyDeviceToHost);
+        for (int i=0;i<64;i++) found_pw[i] = (char)pw[i];
+        cudaFree(d_charset);cudaFree(d_ssid);cudaFree(d_target);
+        cudaFree(d_ap);cudaFree(d_sta);cudaFree(d_found);cudaFree(d_found_pw);
+        return 1;
     }
 
     cudaFree(d_charset);cudaFree(d_ssid);cudaFree(d_target);

@@ -72,6 +72,11 @@ func crackGPU(hashInfo *HashInfo, config *Config) {
 			processed += ws
 			atomic.AddUint64(&gAttempts, ws)
 
+			if found < 0 {
+				fmt.Printf("\nCUDA error occurred. Falling back to CPU...\n")
+				crackCPU(hashInfo, config)
+				return
+			}
 			if found != 0 {
 				pwStr := strings.TrimRight(string(foundPW), "\x00")
 				atomic.StoreInt32(&gFound, 1)
