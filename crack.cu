@@ -155,6 +155,11 @@ int cuda_crack(
     uchar *d_found_pw;
     cudaError_t err;
 
+    int zero = 0, blockSize = 128, found_val = 0;
+    int gridSize = (int)((count + blockSize - 1) / blockSize);
+    if (gridSize < 1) gridSize = 1;
+    if (gridSize > 65535) gridSize = 65535;
+
     #define CUDA_SAFE(call, label) { err=call; if(err){fprintf(stderr,"CUDA error %s\n",cudaGetErrorString(err));goto label;}}
 
     CUDA_SAFE(cudaMalloc(&d_charset, charset_len), cleanup);
@@ -171,13 +176,7 @@ int cuda_crack(
     CUDA_SAFE(cudaMemcpy(d_ap, ap_mac, 6, cudaMemcpyHostToDevice), cleanup7);
     CUDA_SAFE(cudaMemcpy(d_sta, sta_mac, 6, cudaMemcpyHostToDevice), cleanup7);
 
-    int zero = 0;
     cudaMemcpy(d_found, &zero, sizeof(int), cudaMemcpyHostToDevice);
-
-    int blockSize = 128;
-    int gridSize = (int)((count + blockSize - 1) / blockSize);
-    if (gridSize < 1) gridSize = 1;
-    if (gridSize > 65535) gridSize = 65535;
 
     crack_kernel<<<gridSize, blockSize>>>(
         d_charset, charset_len, pw_length,
@@ -187,7 +186,6 @@ int cuda_crack(
 
     CUDA_SAFE(cudaDeviceSynchronize(), cleanup7);
 
-    int found_val = 0;
     cudaMemcpy(&found_val, d_found, sizeof(int), cudaMemcpyDeviceToHost);
 
     if (found_val) {
