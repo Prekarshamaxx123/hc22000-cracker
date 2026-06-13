@@ -4,13 +4,14 @@ package main
 
 /*
 #cgo LDFLAGS: -lOpenCL
+#define CL_TARGET_OPENCL_VERSION 300
 #include <CL/cl.h>
 */
 import "C"
 import (
 	"encoding/hex"
 	"fmt"
-	"runtime"
+	"os"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -203,7 +204,11 @@ func crackGPU(hashInfo *HashInfo, config *Config) {
 
 	ctx := C.clCreateContext(nil, 1, &dev, nil, nil, &err)
 	gpuErr("createContext", err)
-	q := C.clCreateCommandQueue(ctx, dev, 0, &err)
+	var props [3]C.cl_queue_properties
+	props[0] = C.CL_QUEUE_PROPERTIES
+	props[1] = 0
+	props[2] = 0
+	q := C.clCreateCommandQueueWithProperties(ctx, dev, &props[0], &err)
 	gpuErr("createCommandQueue", err)
 
 	csrc := C.CString(kernelSource)
@@ -212,7 +217,7 @@ func crackGPU(hashInfo *HashInfo, config *Config) {
 	prog := C.clCreateProgramWithSource(ctx, 1, &csrc, &srclen, &err)
 	gpuErr("createProgramWithSource", err)
 
-	opts := C.CString("-cl-std=CL1.2")
+	opts := C.CString("")
 	defer C.free(unsafe.Pointer(opts))
 	be := C.clBuildProgram(prog, 1, &dev, opts, nil, nil)
 	if be != C.CL_SUCCESS {
