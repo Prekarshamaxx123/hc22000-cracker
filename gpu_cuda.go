@@ -4,7 +4,7 @@ package main
 
 /*
 #cgo CFLAGS: -I/usr/local/cuda/include
-#cgo LDFLAGS: crack.o -L/usr/local/cuda/lib64 -lcudart -lcuda
+#cgo LDFLAGS: crack.o -L/usr/local/cuda/lib64 -L/usr/lib/x86_64-linux-gnu -lcudart -lcuda
 #include <cuda_runtime.h>
 #include <stdlib.h>
 
