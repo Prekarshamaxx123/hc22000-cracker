@@ -265,7 +265,8 @@ func main() {
 	fmt.Println("Input method:")
 	fmt.Println("  1) hc22000 file")
 	fmt.Println("  2) Manual (enter hash details)")
-	method := promptString("Choice (1-2) [1]: ")
+	fmt.Println("  3) Paste hc22000 line directly")
+	method := promptString("Choice (1-3) [1]: ")
 	if method == "" {
 		method = "1"
 	}
@@ -317,6 +318,13 @@ func main() {
 			APMACRaw: apMAC,
 			STAMACRaw: staMAC,
 			SSID:     ssid,
+		}
+	case "3":
+		rawLine := promptString("Paste hc22000 line: ")
+		hashInfo, err = parseHC22000Line(rawLine)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error parsing line: %v\n", err)
+			os.Exit(1)
 		}
 	default:
 		fmt.Fprintln(os.Stderr, "Invalid choice")
