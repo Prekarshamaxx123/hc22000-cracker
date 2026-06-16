@@ -262,12 +262,67 @@ func main() {
 	fmt.Println("=== WPA PMKID Cracker ===")
 	fmt.Println()
 
-	hc22000Path := promptString("Enter hc22000 file path: ")
-	hashInfo, err := parseHC22000(hc22000Path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+	fmt.Println("Input method:")
+	fmt.Println("  1) hc22000 file")
+	fmt.Println("  2) Manual (enter hash details)")
+	method := promptString("Choice (1-2) [1]: ")
+	if method == "" {
+		method = "1"
+	}
+
+	var hashInfo *HashInfo
+	var err error
+
+	switch method {
+	case "1":
+		hc22000Path := promptString("Enter hc22000 file path: ")
+		hashInfo, err = parseHC22000(hc22000Path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+	case "2":
+		ssid := promptString("SSID (e.g. SLT-Fiber-DDE4): ")
+		if ssid == "" {
+			fmt.Fprintln(os.Stderr, "SSID cannot be empty")
+			os.Exit(1)
+		}
+		bssid := promptString("BSSID (AP MAC, e.g. 5437bb58c829): ")
+		bssid = normalizeMAC(bssid)
+		if len(bssid) != 12 || !isHexString(bssid) {
+			fmt.Fprintln(os.Stderr, "Invalid BSSID (need 12 hex chars)")
+			os.Exit(1)
+		}
+		sta := promptString("STA MAC (client, e.g. 02d8f314e31b): ")
+		sta = normalizeMAC(sta)
+		if sta != "" && (len(sta) != 12 || !isHexString(sta)) {
+			fmt.Fprintln(os.Stderr, "Invalid STA MAC (need 12 hex chars)")
+			os.Exit(1)
+		}
+		pmkidHex := promptString("PMKID (32 hex chars, e.g. 10b5be831d8f53044e0b1e2f74d237c6): ")
+		pmkidHex = strings.ToLower(strings.TrimSpace(pmkidHex))
+		if len(pmkidHex) != 32 || !isHexString(pmkidHex) {
+			fmt.Fprintln(os.Stderr, "Invalid PMKID (need 32 hex chars)")
+			os.Exit(1)
+		}
+		apMAC, _ := parseMAC(bssid)
+		var staMAC []byte
+		if sta != "" {
+			staMAC, _ = parseMAC(sta)
+		} else {
+			staMAC = []byte{0, 0, 0, 0, 0, 0}
+		}
+		hashInfo = &HashInfo{
+			PMKIDHex: pmkidHex,
+			APMACRaw: apMAC,
+			STAMACRaw: staMAC,
+			SSID:     ssid,
+		}
+	default:
+		fmt.Fprintln(os.Stderr, "Invalid choice")
 		os.Exit(1)
 	}
+
 	fmt.Printf("  SSID:   %s\n", hashInfo.SSID)
 	fmt.Printf("  BSSID:  %s\n", hex.EncodeToString(hashInfo.APMACRaw))
 	fmt.Printf("  STA:    %s\n", hex.EncodeToString(hashInfo.STAMACRaw))
