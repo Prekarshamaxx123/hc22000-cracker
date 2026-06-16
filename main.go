@@ -621,9 +621,18 @@ func crackCPU(hashInfo *HashInfo, config *Config, startAt uint64) {
 			pctStr = "  --- "
 		}
 
-		fmt.Printf("\r[%s] Speed: %s/s | %s | Trying: %-*s | Cores: %d/%d",
+		var eta string
+		if speed > 0 && total != math.MaxUint64 {
+			remaining := total - curIdx
+			eta = formatDuration(time.Duration(float64(remaining)/float64(speed)) * time.Second)
+		} else {
+			eta = "--:--:--"
+		}
+
+		fmt.Printf("\r[%s] Speed: %s/s | ETA: %s | %s | Trying: %-*s | Cores: %d/%d",
 			formatDuration(elapsed),
 			formatNumber(speed),
+			eta,
 			pctStr,
 			max(20, config.MaxLen+2), currentPW,
 			numWorkers, numCPU,

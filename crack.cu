@@ -92,6 +92,9 @@ __global__ void __launch_bounds__(128) crack_kernel(
     const uchar *target, const uchar *ap_mac, const uchar *sta_mac,
     ull start, ull count, volatile int *found, uchar *found_pw
 ) {
+    __shared__ uchar s_scr[128][256];
+    uchar *scr = s_scr[threadIdx.x];
+
     ull idx=start+blockIdx.x*blockDim.x+threadIdx.x;
     if (idx>=start+count) return;
     if (*found) return;
@@ -114,7 +117,7 @@ __global__ void __launch_bounds__(128) crack_kernel(
     for (int i=0;i<64;i++) pad[i]^=0x6aU;
     sha1_block(out_state, pad);
 
-    uchar pmk[32], scr[256];
+    uchar pmk[32];
     pbkdf2_fast(in_state, out_state, ssid, ssid_len, 4096, 32, pmk, scr);
 
     // Reuse scr for PMKID: scr[0..63]=pad, scr[64..83]=idig, scr[84..147]=buf

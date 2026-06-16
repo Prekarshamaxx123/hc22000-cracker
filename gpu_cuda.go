@@ -108,8 +108,15 @@ func crackGPU(hashInfo *HashInfo, config *Config, startAt, count uint64) {
 			elapsed := time.Since(startTime)
 			speed := uint64(float64(atomic.LoadUint64(&gAttempts)) / elapsed.Seconds())
 			pct := float64(processed) * 100.0 / float64(lenEnd-lenStart)
-			fmt.Printf("\r[%s] CUDA Speed: %s/s | Len %d | %5.2f%%",
-				formatDuration(elapsed), formatNumber(speed), length, pct)
+			remaining := (lenEnd - lenStart) - processed
+			var eta string
+			if speed > 0 {
+				eta = formatDuration(time.Duration(float64(remaining)/float64(speed)) * time.Second)
+			} else {
+				eta = "--:--:--"
+			}
+			fmt.Printf("\r[%s] CUDA Speed: %s/s | ETA: %s | Len %d | %5.2f%%",
+				formatDuration(elapsed), formatNumber(speed), eta, length, pct)
 		}
 	}
 
