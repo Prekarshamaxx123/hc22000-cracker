@@ -1,0 +1,19 @@
+#!/bin/bash
+# hcrack - auto-install & run WPA PMKID Cracker
+# Usage: bash hcrack  (first run auto-installs Go)
+set -e
+
+cd "$(dirname "$0")"
+
+if ! command -v go &>/dev/null; then
+    echo "[*] Installing Go..."
+    curl -sL https://go.dev/dl/go1.22.5.linux-amd64.tar.gz | sudo tar -C /usr/local -xz
+    export PATH=/usr/local/go/bin:$PATH
+    echo 'export PATH=$PATH:/usr/local/go/bin' >> ~/.bashrc
+fi
+
+go mod tidy 2>/dev/null
+CGO_ENABLED=0 go build -o hashcrack .
+echo "[+] Build OK"
+echo ""
+./hashcrack
